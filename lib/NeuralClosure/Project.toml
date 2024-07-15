@@ -4,6 +4,7 @@ authors = ["Syver Døving Agdestein <syverda@gmail.com>"]
 version = "0.1.0"
 
 [deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 ComponentArrays = "b0b7db55-cfe3-40fc-9ded-d10e2dbeff66"
 IncompressibleNavierStokes = "5e318141-6589-402b-868d-77d7df8c442e"
 KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
