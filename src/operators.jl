@@ -68,20 +68,22 @@ function divergence!(div, u, setup)
     (; Δ, N, Ip, Np) = grid
     D = length(u)
     e = Offset{D}()
-    @kernel function div!(div, u, I0)
-        I = @index(Global, Cartesian)
-        I = I + I0
+
+    I0 = first(Ip)
+    I0 -= oneunit(I0)
+
+    for idx in CartesianIndices(Np)
+        I = idx + I0
         d = zero(eltype(div))
         for α = 1:D
             d += (u[α][I] - u[α][I-e(α)]) / Δ[α][I[α]]
         end
         div[I] = d
     end
-    I0 = first(Ip)
-    I0 -= oneunit(I0)
-    div!(get_backend(div), workgroupsize)(div, u, I0; ndrange = Np)
+
     div
 end
+
 
 function divergence_adjoint!(u, φ, setup)
     (; grid, workgroupsize) = setup
@@ -178,23 +180,26 @@ ChainRulesCore.rrule(::typeof(pressuregradient), p, setup) = (
 Subtract pressure gradient (in-place).
 """
 function applypressure!(u, p, setup)
-    (; grid, workgroupsize) = setup
+    (; grid) = setup
     (; dimension, Δu, Nu, Iu) = grid
     D = dimension()
     e = Offset{D}()
-    @kernel function apply!(u, p, ::Val{α}, I0) where {α}
-        I = @index(Global, Cartesian)
-        I = I0 + I
-        u[α][I] -= (p[I+e(α)] - p[I]) / Δu[α][I[α]]
-    end
-    D = dimension()
+
     for α = 1:D
         I0 = first(Iu[α])
         I0 -= oneunit(I0)
-        apply!(get_backend(u[1]), workgroupsize)(u, p, Val(α), I0; ndrange = Nu[α])
+        
+        for I in CartesianIndices(Nu[α])
+            I_shifted = I0 + I
+            
+            # Check if the shifted index and the next index in the α direction are within the bounds
+            next_idx = I_shifted + e(α)
+            u[α][I_shifted] -= (p[next_idx] - p[I_shifted]) / Δu[α][I_shifted[α]]
+        end
     end
     u
 end
+    
 
 # function applypressure_adjoint!(pbar, φ, u, setup)
 #     (; grid, workgroupsize) = setup

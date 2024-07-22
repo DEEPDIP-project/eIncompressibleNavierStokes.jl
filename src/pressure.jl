@@ -104,11 +104,11 @@ function project!(u, setup; psolver, div, p)
     T = eltype(u[1])
 
     # Divergence of tentative velocity field
-    #divergence!(div, u, setup)
-    #@. div *= Ω
+    divergence!(div, u, setup)
+    @. div *= Ω
 
     # Solve the Poisson equation
-    #poisson!(psolver, p, div)
+    poisson!(psolver, p, div)
     apply_bc_p!(p, T(0), setup)
 
     # Apply pressure correction term
