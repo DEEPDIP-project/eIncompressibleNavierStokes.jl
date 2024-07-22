@@ -564,36 +564,42 @@ ChainRulesCore.rrule(::typeof(diffusion), u, setup) = (
 )
 
 function convectiondiffusion!(F, u, setup)
-    (; grid, workgroupsize, Re) = setup
+    (; grid, Re) = setup
     (; dimension, Δ, Δu, Nu, Iu, A) = grid
     D = dimension()
-    e = Offset{D}()
     ν = 1 / Re
-    @kernel function cd!(F, u, ::Val{α}, ::Val{βrange}, I0) where {α,βrange}
-        I = @index(Global, Cartesian)
-        I = I + I0
-        # for β = 1:D
-        KernelAbstractions.Extras.LoopInfo.@unroll for β in βrange
-            Δuαβ = α == β ? Δu[β] : Δ[β]
-            uαβ1 = (u[α][I-e(β)] + u[α][I]) / 2
-            uαβ2 = (u[α][I] + u[α][I+e(β)]) / 2
-            uβα1 =
-                A[β][α][2][I[α]-(α==β)] * u[β][I-e(β)] +
-                A[β][α][1][I[α]+(α!=β)] * u[β][I-e(β)+e(α)]
-            uβα2 = A[β][α][2][I[α]] * u[β][I] + A[β][α][1][I[α]+1] * u[β][I+e(α)]
-            uαuβ1 = uαβ1 * uβα1
-            uαuβ2 = uαβ2 * uβα2
-            ∂βuα1 = (u[α][I] - u[α][I-e(β)]) / (β == α ? Δ[β][I[β]] : Δu[β][I[β]-1])
-            ∂βuα2 = (u[α][I+e(β)] - u[α][I]) / (β == α ? Δ[β][I[β]+1] : Δu[β][I[β]])
-            F[α][I] += (ν * (∂βuα2 - ∂βuα1) - (uαuβ2 - uαuβ1)) / Δuαβ[I[β]]
-        end
-    end
-    for α = 1:D
+    e = Offset{D}()
+
+    # Loop over each α dimension
+    for α in 1:D
         I0 = first(Iu[α])
         I0 -= oneunit(I0)
-        cd!(get_backend(F[1]), workgroupsize)(F, u, Val(α), Val(1:D), I0; ndrange = Nu[α])
+
+        # Loop over all indices in the ndrange for this α
+        for I in CartesianIndices(Nu[α])
+            I = I + I0
+
+            # Nested loop over β dimensions with unrolling
+            for β in 1:D
+                Δuαβ = α == β ? Δu[β] : Δ[β]
+                I_minus_eβ = I - e(β)
+                I_plus_eβ = I + e(β)
+                I_minus_eβ_plus_eα = I_minus_eβ + e(α)
+
+                uαβ1 = (u[α][I_minus_eβ] + u[α][I]) / 2
+                uαβ2 = (u[α][I] + u[α][I_plus_eβ]) / 2
+                uβα1 = A[β][α][2][I[α]-(α==β)] * u[β][I_minus_eβ] +
+                       A[β][α][1][I[α]+(α!=β)] * u[β][I_minus_eβ_plus_eα]
+                uβα2 = A[β][α][2][I[α]] * u[β][I] + A[β][α][1][I[α]+1] * u[β][I+e(α)]
+                uαuβ1 = uαβ1 * uβα1
+                uαuβ2 = uαβ2 * uβα2
+                ∂βuα1 = (u[α][I] - u[α][I_minus_eβ]) / (β == α ? Δ[β][I[β]] : Δu[β][I[β]-1])
+                ∂βuα2 = (u[α][I_plus_eβ] - u[α][I]) / (β == α ? Δ[β][I[β]+1] : Δu[β][I[β]])
+                F[α][I] += (ν * (∂βuα2 - ∂βuα1) - (uαuβ2 - uαuβ1)) / Δuαβ[I[β]]
+            end
+        end
     end
-    F
+    return F
 end
 
 # convectiondiffusion(u, setup) = convectiondiffusion!(zero.(u), u, setup)
