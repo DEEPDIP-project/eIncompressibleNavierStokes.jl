@@ -51,7 +51,7 @@ updated state and parameters.
 function train(
     dataloaders,
     loss,
-    opt,
+    optstate,
     θ;
     niter = 100,
     ncallback = 1,
@@ -63,12 +63,12 @@ function train(
             b = d()
             first(gradient(θ -> loss(b, θ), θ))
         end
-        opt, θ = Optimisers.update(opt, θ, g)
+        optstate, θ = Optimisers.update(optstate, θ, g)
         if i % ncallback == 0
             callbackstate = callback(callbackstate, i, θ)
         end
     end
-    (; opt, θ, callbackstate)
+    (; optstate, θ, callbackstate)
 end
 
 """
@@ -208,6 +208,19 @@ function create_relerr_post(;
     end
 end
 
+"""
+    create_relerr_symmetry_post(;
+        u,
+        setup,
+        method = RKMethods.RK44(; T = eltype(setup.grid.x[1])),
+        psolver,
+        Δt,
+        nstep,
+        g = 1,
+    )
+
+Create a-posteriori symmetry error.
+"""
 function create_relerr_symmetry_post(;
     u,
     setup,

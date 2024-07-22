@@ -1,10 +1,19 @@
 # # A-posteriori analysis: Large Eddy Simulation (2D)
 #
-# Generate filtered DNS data, train closure model, compare filters,
-# closure models, and projection orders.
+# This script is used to generate results for the the paper [Agdestein2024](@citet).
+#
+# - Generate filtered DNS data
+# - Train closure models
+# - Compare filters, closure models, and projection orders
 #
 # The filtered DNS data is saved and can be loaded in a subesequent session.
 # The learned CNN parameters are also saved.
+
+# ## Load packages
+#
+# Note: Run `setup.jl` to install and load all required packages.
+# `IncompressibleNavierStokes` and `NeuralClosure` are local packages
+# that need to be `Pkg.develop`ed. This is done in the `setup.jl` script.
 
 using Adapt
 using GLMakie
@@ -44,7 +53,9 @@ outdir = "output/postanalysis"
 ispath(plotdir) || mkpath(plotdir)
 ispath(outdir) || mkpath(outdir)
 
-# Random number generator seeds ################################################
+########################################################################## #src
+
+# ## Random number seeds
 #
 # Use a new RNG with deterministic seed for each code "section"
 # so that e.g. training batch selection does not depend on whether we
@@ -65,7 +76,9 @@ seeds = (;
     post = 456, # A-posteriori training batch selection
 )
 
-# Hardware selection ########################################################
+########################################################################## #src
+
+# ## Hardware selection
 
 # For running on CPU.
 # Consider reducing the sizes of DNS, LES, and CNN layers if
@@ -77,14 +90,16 @@ clean() = nothing
 
 # For running on a CUDA compatible GPU
 using LuxCUDA
-using CUDA;
-T = Float32;
-ArrayType = CuArray;
-CUDA.allowscalar(false);
+using CUDA
+T = Float32
+ArrayType = CuArray
+CUDA.allowscalar(false)
 device = x -> adapt(CuArray, x)
 clean() = (GC.gc(); CUDA.reclaim())
 
-# Data generation ###########################################################
+########################################################################## #src
+
+# ## Data generation
 #
 # Create filtered DNS data for training, validation, and testing.
 
@@ -163,15 +178,15 @@ io_train = create_io_arrays(data_train, setups_train);
 io_valid = create_io_arrays(data_valid, setups_valid);
 io_test = create_io_arrays([data_test], setups_test);
 
-# # Save IO arrays
-# jldsave("$outdir/io_train.jld2"; io_train)
-# jldsave("$outdir/io_valid.jld2"; io_valid)
-# jldsave("$outdir/io_test.jld2"; io_test)
-#
-# # Load IO arrays
-# io_train = load("$outdir/io_train.jld2"; "io_train")
-# io_valid = load("$outdir/io_valid.jld2"; "io_valid")
-# io_test = load("$outdir/io_test.jld2"; "io_test")
+## # Save IO arrays
+## jldsave("$outdir/io_train.jld2"; io_train)
+## jldsave("$outdir/io_valid.jld2"; io_valid)
+## jldsave("$outdir/io_test.jld2"; io_test)
+##
+## # Load IO arrays
+## io_train = load("$outdir/io_train.jld2"; "io_train")
+## io_valid = load("$outdir/io_valid.jld2"; "io_valid")
+## io_test = load("$outdir/io_test.jld2"; "io_test")
 
 # Check that data is reasonably bounded
 io_train[1].u |> extrema
@@ -187,16 +202,16 @@ let
     ig = 2
     ifil = 1
     field, setup = data_train[1].data[ig, ifil].u, setups_train[ig]
-    # field, setup = data_valid[1].data[ig, ifil].u, setups_valid[ig];
-    # field, setup = data_test.data[ig, ifil].u, setups_test[ig];
+    ## field, setup = data_valid[1].data[ig, ifil].u, setups_valid[ig];
+    ## field, setup = data_test.data[ig, ifil].u, setups_test[ig];
     u = device.(field[1])
     o = Observable((; u, temp = nothing, t = nothing))
-    # energy_spectrum_plot(o; setup) |> display
+    ## energy_spectrum_plot(o; setup) |> display
     fieldplot(
         o;
         setup,
-        # fieldname = :velocitynorm,
-        # fieldname = 1,
+        ## fieldname = :velocitynorm,
+        ## fieldname = 1,
     ) |> display
     for i = 1:length(field)
         o[] = (; o[]..., u = device(field[i]))
@@ -204,25 +219,26 @@ let
     end
 end
 
-# CNN closure model ##########################################################
+########################################################################## #src
+
+# ## CNN closure model
 
 # Random number generator for initial CNN parameters.
 # All training sessions will start from the same θ₀
 # for a fair comparison.
-rng = Random.Xoshiro()
-Random.seed!(rng, seeds.θ₀)
+rng = Random.Xoshiro(seeds.θ₀)
 
-# # CNN architecture 1
-# mname = "balzac"
-# closure, θ₀ = cnn(;
-#     setup = setups_train[1],
-#     radii = [2, 2, 2, 2],
-#     channels = [20, 20, 20, params_train.D],
-#     activations = [leakyrelu, leakyrelu, leakyrelu, identity],
-#     use_bias = [true, true, true, false],
-#     rng,
-# );
-# closure.chain
+## # CNN architecture 1
+## mname = "balzac"
+## closure, θ₀ = cnn(;
+##     setup = setups_train[1],
+##     radii = [2, 2, 2, 2],
+##     channels = [20, 20, 20, params_train.D],
+##     activations = [leakyrelu, leakyrelu, leakyrelu, identity],
+##     use_bias = [true, true, true, false],
+##     rng,
+## );
+## closure.chain
 
 # CNN architecture 2
 mname = "rimbaud"
@@ -245,12 +261,18 @@ ispath(savepath) || mkpath(savepath)
 # must be moved to the GPU before running (`device`)
 closure(device(io_train[1, 1].u[:, :, :, 1:50]), device(θ₀));
 
-# A-priori training ###########################################################
+########################################################################## #src
+
+# ## Training
+
+# ### A-priori training
 #
 # Train one set of CNN parameters for each of the filter types and grid sizes.
+# Use the same batch selection random seed for each training setup.
 # Save parameters to disk after each run.
 # Plot training progress (for a validation data batch).
 
+# Parameter save files
 priorfiles = map(CartesianIndices(io_train)) do I
     ig, ifil = I.I
     "$savepath/prior_ifilter$(ifil)_igrid$(ig).jld2"
@@ -258,7 +280,6 @@ end
 
 # Train
 let
-    # Random number generator for batch selection
     rng = Random.Xoshiro()
     Random.seed!(rng, seeds.prior)
     ngrid, nfilter = size(io_train)
@@ -269,7 +290,8 @@ let
         d = create_dataloader_prior(io_train[ig, ifil]; batchsize = 50, device, rng)
         θ = T(1.0e0) * device(θ₀)
         loss = create_loss_prior(mean_squared_error, closure)
-        opt = Optimisers.setup(Adam(T(1.0e-3)), θ)
+        opt = Adam(T(1.0e-3))
+        optstate = Optimisers.setup(opt, θ)
         it = rand(rng, 1:size(io_valid[ig, ifil].u, 4), 50)
         validset = device(map(v -> v[:, :, :, it], io_valid[ig, ifil]))
         (; callbackstate, callback) = create_callback(
@@ -278,10 +300,10 @@ let
             displayref = true,
             display_each_iteration = false, # Set to `true` if using CairoMakie
         )
-        (; opt, θ, callbackstate) = train(
+        (; optstate, θ, callbackstate) = train(
             [d],
             loss,
-            opt,
+            optstate,
             θ;
             niter = 10_000,
             ncallback = 20,
@@ -309,15 +331,19 @@ map(p -> p.comptime, prior) |> sum # Seconds
 map(p -> p.comptime, prior) |> sum |> x -> x / 60 # Minutes
 map(p -> p.comptime, prior) |> sum |> x -> x / 3600 # Hours
 
-# A-posteriori training ######################################################
+########################################################################## #src
+
+# ### A-posteriori training
 #
 # Train one set of CNN parameters for each
 # projection order, filter type and grid size.
+# Use the same batch selection random seed for each training setup.
 # Save parameters to disk after each combination.
 # Plot training progress (for a validation data batch).
 #
 # The time stepper `RKProject` allows for choosing when to project.
 
+# Parameter save files
 postfiles = map(CartesianIndices((size(io_train)..., 2))) do I
     ig, ifil, iorder = I.I
     "$savepath/post_iorder$(iorder)_ifil$(ifil)_ig$(ig).jld2"
@@ -325,9 +351,7 @@ end
 
 # Train
 let
-    # Random number generator for batch selection
-    rng = Random.Xoshiro()
-    Random.seed!(rng, seeds.post)
+    rng = Random.Xoshiro(seeds.post)
     ngrid, nfilter = size(io_train)
     for iorder = 1:2, ifil = 1:nfilter, ig = 1:ngrid
         clean()
@@ -345,7 +369,8 @@ let
         data = [(; u = d.data[ig, ifil].u, d.t) for d in data_train]
         d = create_dataloader_post(data; device, nunroll = 20, rng)
         θ = copy(θ_cnn_prior[ig, ifil])
-        opt = Optimisers.setup(Adam(T(1.0e-3)), θ)
+        opt = Adam(T(1.0e-3))
+        optstate = Optimisers.setup(opt, θ)
         it = 1:30
         data = data_valid[1]
         data = (; u = device.(data.data[ig, ifil].u[it]), t = data.t[it])
@@ -361,8 +386,16 @@ let
             θ,
             displayref = false,
         )
-        (; opt, θ, callbackstate) =
-            train([d], loss, opt, θ; niter = 2000, ncallback = 10, callbackstate, callback)
+        (; optstate, θ, callbackstate) = train(
+            [d],
+            loss,
+            optstate,
+            θ;
+            niter = 2000,
+            ncallback = 10,
+            callbackstate,
+            callback,
+        )
         θ = callbackstate.θmin # Use best θ instead of last θ
         post = (; θ = Array(θ), comptime = time() - starttime)
         jldsave(postfiles[iorder, ifil, ig]; post)
@@ -385,7 +418,9 @@ map(p -> p.comptime, post) |> sum
 map(p -> p.comptime, post) |> sum |> x -> x / 60
 map(p -> p.comptime, post) |> sum |> x -> x / 3600
 
-# Train Smagorinsky model ####################################################
+########################################################################## #src
+
+# ### Train Smagorinsky model
 #
 # Use a-posteriori error grid search to determine
 # the optimal Smagorinsky constant.
@@ -446,7 +481,11 @@ smag = load("$outdir/smag.jld2")["smag"];
 map(s -> s.comptime, smag)
 map(s -> s.comptime, smag) |> sum
 
-# Compute a-priori errors ###################################################
+########################################################################## #src
+
+# ## Prediction errors
+
+# ### Compute a-priori errors
 #
 # Note that it is still interesting to compute the a-priori errors for the
 # a-posteriori trained CNN.
@@ -473,7 +512,9 @@ eprior.post
 eprior.prior |> x -> reshape(x, :) |> x -> round.(x; digits = 2)
 eprior.post |> x -> reshape(x, :, 2) |> x -> round.(x; digits = 2)
 
-# Compute a-posteriori errors #################################################
+########################################################################## #src
+
+# ### Compute a-posteriori errors
 
 (; e_nm, e_smag, e_cnn, e_cnn_post) = let
     e_nm = zeros(T, size(data_test.data)...)
@@ -487,13 +528,13 @@ eprior.post |> x -> reshape(x, :, 2) |> x -> round.(x; digits = 2)
         psolver = psolver_spectral(setup)
         data = (; u = device.(data_test.data[ig, ifil].u), t = data_test.t)
         nupdate = 2
-        # No model
-        # Only for closurefirst, since projectfirst is the same
+        ## No model
+        ## Only for closurefirst, since projectfirst is the same
         if iorder == 2
             err = create_relerr_post(; data, setup, psolver, closure_model = nothing, nupdate)
             e_nm[ig, ifil] = err(nothing)
         end
-        # Smagorinsky
+        ## Smagorinsky
         err = create_relerr_post(;
             data,
             setup,
@@ -503,8 +544,8 @@ eprior.post |> x -> reshape(x, :, 2) |> x -> round.(x; digits = 2)
             nupdate,
         )
         e_smag[ig, ifil, iorder] = err(θ_smag[ifil, iorder])
-        # CNN
-        # Only the first grids are trained for
+        ## CNN
+        ## Only the first grids are trained for
         if ig ≤ size(data_train[1].data, 1)
             err = create_relerr_post(;
                 data,
@@ -530,7 +571,9 @@ round.(
     sigdigits = 2,
 )
 
-# Plot a-priori errors ########################################################
+########################################################################## #src
+
+# ### Plot a-priori errors
 
 # Better for PDF export
 CairoMakie.activate!()
@@ -591,7 +634,9 @@ fig = with_theme(; palette) do
     fig
 end
 
-# Plot a-posteriori errors ###################################################
+########################################################################## #src
+
+# ### Plot a-posteriori errors
 
 # Better for PDF export
 CairoMakie.activate!()
@@ -670,9 +715,11 @@ with_theme(; palette) do
     fig
 end
 
-# Energy evolution ###########################################################
-#
-# Compute total kinetic energy as a function of time.
+########################################################################## #src
+
+# ## Energy evolution
+
+# ### Compute total kinetic energy as a function of time
 
 kineticenergy = let
     clean()
@@ -705,7 +752,7 @@ kineticenergy = let
         end
         processors = (; ewriter)
         if iorder == 1
-            # Does not depend on projection order
+            ## Does not depend on projection order
             ke_ref[ig, ifil] = map(
                 u -> IncompressibleNavierStokes.total_kinetic_energy(device(u), setup),
                 data_test.data[ig, ifil].u,
@@ -760,7 +807,9 @@ kineticenergy = let
 end;
 clean();
 
-# Plot energy evolution ########################################################
+########################################################################## #src
+
+# ### Plot energy evolution
 
 # Better for PDF export
 CairoMakie.activate!()
@@ -823,9 +872,11 @@ with_theme(; palette) do
     end
 end
 
-# Compute Divergence ##########################################################
-#
-# Compute divergence as a function of time.
+########################################################################## #src
+
+# ## Divergence evolution
+
+# ### Compute divergence as a function of time
 
 divs = let
     clean()
@@ -861,7 +912,7 @@ divs = let
             dhist
         end
         if iorder == 1
-            # Does not depend on projection order
+            ## Does not depend on projection order
             d_ref[ig, ifil] = map(data_test.data[ig, ifil].u) do u
                 u = device(u)
                 div = IncompressibleNavierStokes.divergence(u, setup)
@@ -901,13 +952,15 @@ divs.d_smag .|> extrema
 divs.d_cnn_prior .|> extrema
 divs.d_cnn_post .|> extrema
 
-# Plot Divergence #############################################################
+########################################################################## #src
+
+# ### Plot Divergence
 
 # Better for PDF export
 CairoMakie.activate!()
 
 with_theme(;
-    # fontsize = 20,
+    ## fontsize = 20,
     palette,
 ) do
     t = data_test.t
@@ -952,7 +1005,9 @@ with_theme(;
     end
 end
 
-# Solutions at final time ####################################################
+########################################################################## #src
+
+# ## Solutions at final time
 
 ufinal = let
     ngrid, nfilter = size(io_train)
@@ -984,7 +1039,7 @@ ufinal = let
                 θ,
             )[1].u .|> Array
         if iorder == 1
-            # Does not depend on projection order
+            ## Does not depend on projection order
             u_ref[igrid, ifil] = data_test.data[igrid, ifil].u[end]
             u_nomodel[igrid, ifil] = s(nothing, nothing)
         end
@@ -999,13 +1054,15 @@ ufinal = let
 end;
 clean();
 
-# # Save solution
-# jldsave("$savepath/ufinal.jld2"; ufinal)
-#
-# # Load solution
-# ufinal = load("$savepath/ufinal.jld2")["ufinal"];
+## # Save solution
+## jldsave("$savepath/ufinal.jld2"; ufinal)
+##
+## # Load solution
+## ufinal = load("$savepath/ufinal.jld2")["ufinal"];
 
-# Plot spectra ###############################################################
+########################################################################## #src
+
+# ### Plot spectra
 #
 # Plot kinetic energy spectra at final time.
 
@@ -1037,20 +1094,20 @@ fig = with_theme(; palette) do
                 abs2.(uhat) ./ (2 * prod(size(u))^2)
             end
             e = A * reshape(e, :)
-            # e = max.(e, eps(T)) # Avoid log(0)
+            ## e = max.(e, eps(T)) # Avoid log(0)
             ehat = Array(e)
         end
         kmax = maximum(κ)
-        # Build inertial slope above energy
+        ## Build inertial slope above energy
         krange = [T(16), T(κ[end])]
         slope, slopelabel = -T(3), L"$\kappa^{-3}"
         slopeconst = maximum(specs[1] ./ κ .^ slope)
         offset = 3
         inertia = offset .* slopeconst .* krange .^ slope
-        # Nice ticks
+        ## Nice ticks
         logmax = round(Int, log2(kmax + 1))
         xticks = T(2) .^ (0:logmax)
-        # Make plot
+        ## Make plot
         fig = Figure(; size = (500, 400))
         ax = Axis(
             fig[1, 1];
@@ -1077,7 +1134,9 @@ fig = with_theme(; palette) do
 end
 clean();
 
-# Plot fields ################################################################
+########################################################################## #src
+
+# ### Plot fields
 
 # Export to PNG, otherwise each volume gets represented
 # as a separate rectangle in the PDF
@@ -1085,7 +1144,7 @@ clean();
 GLMakie.activate!()
 
 with_theme(; fontsize = 25, palette) do
-    # Reference box for eddy comparison
+    ## Reference box for eddy comparison
     x1 = 0.3
     x2 = 0.5
     y1 = 0.5
@@ -1116,7 +1175,7 @@ with_theme(; fontsize = 25, palette) do
             lines!(box; linewidth = 5, color = Cycled(2)) # Red in palette
             fname = "$(name)_$(suffix).png"
             save(fname, fig)
-            # run(`convert $fname -trim $fname`) # Requires imagemagick
+            ## run(`convert $fname -trim $fname`) # Requires imagemagick
         end
         iorder == 2 &&
             makeplot(device(ufinal.u_ref[igrid, ifil]), "Reference, $fil, $nles", "ref")

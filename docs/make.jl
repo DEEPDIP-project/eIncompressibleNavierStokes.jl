@@ -20,33 +20,77 @@ DocMeta.setdocmeta!(
 
 bib = CitationBibliography(joinpath(@__DIR__, "references.bib"))
 
+makemarkdown(inputfile, outputdir; run) =
+    if run
+        # With code execution blocks
+        Literate.markdown(inputfile, outputdir)
+    else
+        # Turn off code execution.
+        # Note: Literate has a `documenter = false` option, but this would also remove
+        # the "Edit on GitHub" button at the top, therefore we disable the `@example`-blocks
+        # manually
+        Literate.markdown(
+            inputfile,
+            outputdir;
+            preprocess = content ->
+                "# *Note: Output is not generated for this example (to save resources on GitHub).*\n\n" *
+                content,
+            postprocess = content -> replace(content, r"@example.*" => "julia"),
+        )
+    end
+
 # Generate examples
+e = "examples"
 examples = [
-    "Tutorial: Lid-Driven Cavity (2D)" => "LidDrivenCavity2D",
-    "Convergence: Taylor-Green Vortex (2D)" => "TaylorGreenVortex2D",
-    "Unsteady inflow: Actuator (2D)" => "Actuator2D",
-    # "Actuator (3D)" => "Actuator3D",
-    "Walls: Backward Facing Step (2D)" => "BackwardFacingStep2D",
-    # "Backward Facing Step (3D)" => "BackwardFacingStep3D",
-    "Decaying Turbulunce (2D)" => "DecayingTurbulence2D",
-    # "Decaying Turbulunce (3D)" => "DecayingTurbulence3D",
-    # "Lid-Driven Cavity (3D)" => "LidDrivenCavity3D",
-    # "Planar Mixing (2D)" => "PlanarMixing2D",
-    # "Shear Layer (2D)" => "ShearLayer2D",
-    # "Taylor-Green Vortex (3D)" => "TaylorGreenVortex3D",
-    "Temperature: Rayleigh-Bénard (2D)" => "RayleighBenard2D",
+    "Simple flows" => [
+        (true, "examples/DecayingTurbulence2D", "Decaying Turbulunce (2D)"),
+        (false, "examples/DecayingTurbulence3D", "Decaying Turbulunce (3D)"),
+        (true, "examples/TaylorGreenVortex2D", "Taylor-Green Vortex (2D)"),
+        (false, "examples/TaylorGreenVortex3D", "Taylor-Green Vortex (3D)"),
+        (false, "examples/ShearLayer2D", "Shear Layer (2D)"),
+        (false, "examples/PlaneJets2D", "Plane jets (2D)"),
+    ],
+    "Mixed boundary conditions" => [
+        (true, "examples/Actuator2D", "Actuator (2D)"),
+        (false, "examples/Actuator3D", "Actuator (3D)"),
+        (false, "examples/BackwardFacingStep2D", "Backward Facing Step (2D)"),
+        (false, "examples/BackwardFacingStep3D", "Backward Facing Step (3D)"),
+        (false, "examples/LidDrivenCavity2D", "Lid-Driven Cavity (2D)"),
+        (false, "examples/LidDrivenCavity3D", "Lid-Driven Cavity (3D)"),
+        (false, "examples/MultiActuator", "Multiple actuators (2D)"),
+        (false, "examples/PlanarMixing2D", "Planar Mixing (2D)"),
+    ],
+    "With temperature field" => [
+        (true, "examples/RayleighBenard2D", "Rayleigh-Bénard (2D)"),
+        (false, "examples/RayleighBenard3D", "Rayleigh-Bénard (3D)"),
+        (true, "examples/RayleighTaylor2D", "Rayleigh-Taylor (2D)"),
+        (false, "examples/RayleighTaylor3D", "Rayleigh-Taylor (3D)"),
+    ],
+    "Neural closure models" => [
+        (false, "lib/PaperDC/prioranalysis", "Filter analysis"),
+        (false, "lib/PaperDC/postanalysis", "CNN closures"),
+        (false, "lib/SymmetryClosure/symmetryanalysis", "Equivariant closures"),
+    ],
 ]
 
-output = "generated"
-for e ∈ examples
-    e = joinpath(@__DIR__, "..", "examples", "$(e.second).jl")
-    o = joinpath(@__DIR__, "src", output)
-    Literate.markdown(e, o)
-    # Literate.notebook(e, o)
-    # Literate.script(e, o)
+# Convert scripts to executable markdown files
+output = "examples/generated"
+outputdir = joinpath(@__DIR__, "src", output)
+## rm(outputdir; recursive = true)
+for e ∈ examples, (run, name, title) ∈ e[2]
+    inputfile = joinpath(@__DIR__, "..", name * ".jl")
+    makemarkdown(inputfile, outputdir; run)
+end
+
+example_pages = map(examples) do e
+    e[1] => map(e[2]) do (run, name, title)
+        title => joinpath(output, basename(name) * ".md")
+    end
 end
 
 makedocs(;
+    # draft = true,
+    # clean = false,
     modules = [IncompressibleNavierStokes, NeuralClosure],
     plugins = [bib],
     authors = "Syver Døving Agdestein, Benjamin Sanderse, and contributors",
@@ -58,14 +102,14 @@ makedocs(;
     #     assets = String[],
     # ),
     format = DocumenterVitepress.MarkdownVitepress(;
-        repo = "https://github.com/agdestein/IncompressibleNavierStokes.jl",
+        repo = "github.com/agdestein/IncompressibleNavierStokes.jl",
         devurl = "dev",
     ),
     pagesonly = true,
     pages = [
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
-        "Examples" => [e.first => joinpath(output, e.second * ".md") for e ∈ examples],
+        "Examples" => vcat("Overview" => "examples/overview.md", example_pages),
         "Equations" => [
             "Incompressible Navier-Stokes equations" => "equations/ns.md",
             "Spatial discretization" => "equations/spatial.md",
@@ -87,6 +131,7 @@ makedocs(;
     ],
 )
 
+# Only deploy docs on CI
 get(ENV, "CI", "false") == "true" && deploydocs(;
     repo = "github.com/agdestein/IncompressibleNavierStokes.jl",
     target = "build",

@@ -1,23 +1,33 @@
-# LSP hack
-if false
-    include("src/SymmetryClosure.jl")
-    include("../NeuralClosure/src/NeuralClosure.jl")
-    include("../../src/IncompressibleNavierStokes.jl")
-    using .SymmetryClosure
-    using .NeuralClosure
-    using .IncompressibleNavierStokes
-end
+# LSP hack                                             #src
+if false                                               #src
+    include("src/SymmetryClosure.jl")                  #src
+    include("../NeuralClosure/src/NeuralClosure.jl")   #src
+    include("../../src/IncompressibleNavierStokes.jl") #src
+    using .SymmetryClosure                             #src
+    using .NeuralClosure                               #src
+    using .IncompressibleNavierStokes                  #src
+end                                                    #src
 
-# # A-posteriori analysis: Large Eddy Simulation (2D)
+########################################################################## #src
+
+# # Symmetry-preserving closure models
 #
-# Generate filtered DNS data, train closure model, compare filters,
-# closure models, and projection orders.
+# - Generate filtered DNS data
+# - Define CNN closure models
+# - Train all closure models in the same way
+# - Compare errors and symmetry errors
 #
 # The filtered DNS data is saved and can be loaded in a subesequent session.
 # The learned CNN parameters are also saved.
 
+# ## Load packages
+#
+# Note: Run `setup.jl` to install and load all required packages.
+# `IncompressibleNavierStokes` and `NeuralClosure` are local packages
+# that need to be `Pkg.develop`ed. This is done in the `setup.jl` script.
+
 using Adapt
-# using GLMakie
+## using GLMakie
 using CairoMakie
 using IncompressibleNavierStokes
 using JLD2
@@ -29,12 +39,16 @@ using Random
 using SymmetryClosure
 
 # Choose where to put output
-plotdir = joinpath(@__DIR__, "output", "plots")
-datadir = joinpath(@__DIR__, "output", "data")
+## outdir = joinpath(@__DIR__, "output")
+outdir = joinpath(@__DIR__, "output", "nobias")
+plotdir = joinpath(outdir, "plots")
+datadir = joinpath(outdir, "data")
 ispath(plotdir) || mkpath(plotdir)
 ispath(datadir) || mkpath(datadir)
 
-# Random number generator seeds ################################################
+########################################################################## #src
+
+# ## Define random number generator seeds
 #
 # Use a new RNG with deterministic seed for each code "section"
 # so that e.g. training batch selection does not depend on whether we
@@ -45,8 +59,7 @@ ispath(datadir) || mkpath(datadir)
 # same RNG, and mutating one also mutates the other.
 # `rng = Xoshiro()` creates an independent copy each time.
 #
-# We define all the seeds here so that we don't accidentally type the same seed
-# twice.
+# We define all the seeds here.
 
 seeds = (;
     dns = 123, # Initial conditions
@@ -54,7 +67,9 @@ seeds = (;
     training = 345, # Training batch selection
 )
 
-# Hardware selection ########################################################
+########################################################################## #src
+
+# ## Hardware selection
 
 # For running on CPU.
 # Consider reducing the sizes of DNS, LES, and CNN layers if
@@ -73,7 +88,9 @@ CUDA.allowscalar(false);
 device = x -> adapt(CuArray, x)
 clean() = (GC.gc(); CUDA.reclaim())
 
-# Data generation ###########################################################
+########################################################################## #src
+
+# ## Data generation
 #
 # Create filtered DNS data for training, validation, and testing.
 
@@ -92,7 +109,7 @@ get_params(nlesscalar) = (;
     Δt = T(5e-5),
     nles = map(n -> (n, n), nlesscalar), # LES resolutions
     ndns = (n -> (n, n))(4096), # DNS resolution
-    # ndns = (n -> (n, n))(1024), # DNS resolution
+    ## ndns = (n -> (n, n))(1024), # DNS resolution
     filters = (FaceAverage(),),
     ArrayType,
     create_psolver = psolver_spectral,
@@ -109,12 +126,12 @@ params_test = (; get_params(nles)..., tsim = T(0.1), savefreq = 10);
 
 create_data = false
 if create_data
-    # Create filtered DNS data
+    ## Create filtered DNS data
     data_train = [create_les_data(; params_train...) for _ = 1:5]
     data_valid = [create_les_data(; params_valid...) for _ = 1:1]
     data_test = [create_les_data(; params_test...) for _ = 1:1]
 
-    # Save filtered DNS data
+    ## Save filtered DNS data
     jldsave("$datadir/data_train.jld2"; data_train)
     jldsave("$datadir/data_valid.jld2"; data_valid)
     jldsave("$datadir/data_test.jld2"; data_test)
@@ -134,7 +151,7 @@ sum(d -> d.comptime, data_train) / 60
 data_test[1].comptime / 60
 sum(dd -> sum(d -> d.comptime, dd), (data_train, data_valid, data_test))
 
-# Build LES setup and assemble operators
+# Build LES setups and assemble operators
 getsetups(params) =
     map(params.nles) do nles
         x = ntuple(α -> LinRange(T(0), T(1), nles[α] + 1), params.D)
@@ -164,20 +181,20 @@ io_test[1].u |> extrema
 io_test[1].c |> extrema
 
 # Inspect data (live animation with GLMakie)
-# GLMakie.activate!()
+## GLMakie.activate!()
 let
     ig = 2
     field, setup = data_train[1].data[ig].u, setups_train[ig]
-    # field, setup = data_valid[1].data[ig].u, setups_valid[ig];
-    # field, setup = data_test[.data[ig].u, setups_test[ig];
+    ## field, setup = data_valid[1].data[ig].u, setups_valid[ig];
+    ## field, setup = data_test[.data[ig].u, setups_test[ig];
     u = device.(field[1])
     o = Observable((; u, temp = nothing, t = nothing))
-    # energy_spectrum_plot(o; setup) |> display
+    ## energy_spectrum_plot(o; setup) |> display
     fig = fieldplot(
         o;
         setup,
-        # fieldname = :velocitynorm,
-        # fieldname = 1,
+        ## fieldname = :velocitynorm,
+        ## fieldname = 1,
     )
     fig |> display
     for i in eachindex(field)
@@ -188,11 +205,12 @@ let
     end
 end
 
-# CNN closure models #########################################################
+########################################################################## #src
 
-# Random number generator for initial CNN parameters.
-# All training sessions will start from the same θ₀
-# for a fair comparison.
+# ## Define CNN closure models
+#
+# Define different closure models.
+# Use the same random number generator for all initial parameters.
 
 # Regular CNN
 m_cnn = let
@@ -203,14 +221,15 @@ m_cnn = let
         radii = [2, 2, 2, 2, 2],
         channels = [24, 24, 24, 24, params_train.D],
         activations = [tanh, tanh, tanh, tanh, identity],
-        use_bias = [true, true, true, true, false],
+        ## use_bias = [true, true, true, true, false],
+        use_bias = fill(false, 5),
         rng,
     )
     (; closure, θ₀, name)
 end;
 m_cnn.closure.chain
 
-# Group CNN: Same number of channels as regular CNN
+# Group CNN A: Same number of channels as regular CNN
 m_gcnn_a = let
     rng = Xoshiro(seeds.θ₀)
     name = "gcnn_a"
@@ -219,14 +238,15 @@ m_gcnn_a = let
         radii = [2, 2, 2, 2, 2],
         channels = [6, 6, 6, 6, 1],
         activations = [tanh, tanh, tanh, tanh, identity],
-        use_bias = [true, true, true, true, false],
+        ## use_bias = [true, true, true, true, false],
+        use_bias = fill(false, 5),
         rng,
     )
     (; closure, θ₀, name)
 end;
 m_gcnn_a.closure.chain
 
-# Group CNN: Same number of parameters as regular CNN
+# Group CNN B: Same number of parameters as regular CNN
 m_gcnn_b = let
     rng = Xoshiro(seeds.θ₀)
     name = "gcnn_b"
@@ -235,28 +255,34 @@ m_gcnn_b = let
         radii = [2, 2, 2, 2, 2],
         channels = [12, 12, 12, 12, 1],
         activations = [tanh, tanh, tanh, tanh, identity],
-        use_bias = [true, true, true, true, false],
+        ## use_bias = [true, true, true, true, false],
+        use_bias = fill(false, 5),
         rng,
     )
     (; closure, θ₀, name)
 end;
 m_gcnn_b.closure.chain
 
+# Store models and initial parameters
 models = m_cnn, m_gcnn_a, m_gcnn_b;
 
-# Give the CNN a test run
+# Give the CNNs a test run
 # Note: Data and parameters are stored on the CPU, and
 # must be moved to the GPU before running (`device`)
 models[1].closure(device(io_train[1].u[:, :, :, 1:50]), device(models[1].θ₀));
 models[2].closure(device(io_train[1].u[:, :, :, 1:50]), device(models[2].θ₀));
 models[3].closure(device(io_train[1].u[:, :, :, 1:50]), device(models[3].θ₀));
 
-# A-priori training ###########################################################
+########################################################################## #src
+
+# ## A-priori training
 #
-# Train one set of CNN parameters for each of the filter types and grid sizes.
+# Train the models using an a-priori loss function.
+# Use the same batch selection random number seed for each model.
 # Save parameters to disk after each run.
 # Plot training progress (for a validation data batch).
 
+# Parameter save files
 priorfiles = broadcast(eachindex(nles), eachindex(models)') do ig, im
     m = models[im]
     "$datadir/prior_$(m.name)_igrid$ig.jld2"
@@ -265,17 +291,17 @@ end
 # Train
 dotrain = false
 dotrain && let
-    # Random number generator for batch selection
     rng = Xoshiro(seeds.training)
     for (im, m) in enumerate(models), ig = 1:length(nles)
-        plotfile = "$plotdir/training_prior_$(m.name)_igrid$ig.pdf"
-        clean()
-        starttime = time()
         @info "Training for $(m.name), grid $ig"
+        clean()
+        plotfile = "$plotdir/training_prior_$(m.name)_igrid$ig.pdf"
+        starttime = time()
         d = create_dataloader_prior(io_train[ig]; batchsize = 100, device, rng)
         θ = device(m.θ₀)
         loss = create_loss_prior(mean_squared_error, m.closure)
-        opt = Optimisers.setup(Adam(T(1.0e-3)), θ)
+        opt = Adam(T(1.0e-3))
+        optstate = Optimisers.setup(opt, θ)
         it = rand(rng, 1:size(io_valid[ig].u, 4), 50)
         validset = device(map(v -> v[:, :, :, it], io_valid[ig]))
         (; callbackstate, callback) = create_callback(
@@ -284,10 +310,10 @@ dotrain && let
             displayref = true,
             display_each_iteration = true, # Set to `true` if using CairoMakie
         )
-        (; opt, θ, callbackstate) = train(
+        (; optstate, θ, callbackstate) = train(
             [d],
             loss,
-            opt,
+            optstate,
             θ;
             niter = 10_000,
             ncallback = 20,
@@ -326,7 +352,11 @@ map(p -> p.comptime, prior) |> sum # Seconds
 map(p -> p.comptime, prior) |> sum |> x -> x / 60 # Minutes
 map(p -> p.comptime, prior) |> sum |> x -> x / 3600 # Hours
 
-# Compute a-priori errors ###################################################
+########################################################################## #src
+
+# ## Error analysis
+
+# ### Compute a-priori errors
 #
 # Note that it is still interesting to compute the a-priori errors for the
 # a-posteriori trained CNN.
@@ -345,7 +375,7 @@ clean()
 
 e_prior
 
-# Compute a-posteriori errors #################################################
+# # Compute a-posteriori errors
 
 (; e_nm, e_m) = let
     e_nm = zeros(T, length(nles))
@@ -360,7 +390,6 @@ e_prior
         err =
             create_relerr_post(; data, setup, psolver, closure_model = nothing, nupdate)
         e_nm[ig] = err(nothing)
-        # CNN
         for (im, m) in enumerate(models)
             @info "Computing a-posteriori error for $(m.name), grid $ig"
             err = create_relerr_post(;
@@ -380,8 +409,9 @@ clean()
 e_nm
 e_m
 
-# Compute symmetry errors #####################################################
+# ### Compute symmetry errors
 
+# A-priori errors
 e_symm_prior = let
     e = zeros(T, length(nles), length(models))
     for (im, m) in enumerate(models), ig = 1:length(nles)
@@ -398,6 +428,7 @@ clean()
 
 e_symm_prior
 
+# A-posteriori errors
 e_symm_post = let
     e = zeros(T, length(nles), length(models))
     for (im, m) in enumerate(models), ig = 1:size(data_test[1].data, 1)
@@ -420,7 +451,7 @@ clean()
 
 e_symm_post
 
-# Plot errors #################################################################
+# ### Plot errors
 
 let
     for (e, title, filename) in [
