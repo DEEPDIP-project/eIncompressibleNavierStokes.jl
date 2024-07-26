@@ -169,12 +169,23 @@ function psolver_direct(::Array, setup)
         fact = ldlt(L)
     end
     # fact = factorize(L)
+#    function psolve!(p, f)
+#        copyto!(view(ftemp, viewrange), view(view(f, Ip), :))
+#        ptemp .= fact \ ftemp
+#        copyto!(view(view(p, Ip), :), eltype(p).(view(ptemp, viewrange)))
+#        p
+#    end
     function psolve!(p, f)
-        copyto!(view(ftemp, viewrange), view(view(f, Ip), :))
-        ptemp .= fact \ ftemp
-        copyto!(view(view(p, Ip), :), eltype(p).(view(ptemp, viewrange)))
-        p
-    end
+    	ftemp[viewrange] .= f[Ip]
+    	try
+    	    ptemp .= fact \ ftemp
+    	catch e
+    	    error("Linear solve failed: ", e)
+    	end
+    	p[Ip] .= ptemp[viewrange]
+    	return p
+   end
+
 end
 
 """
