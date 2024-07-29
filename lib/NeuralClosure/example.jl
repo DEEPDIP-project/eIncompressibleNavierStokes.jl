@@ -74,6 +74,7 @@ size(les_data.data[1][:c])
 
 # Dataset
 io_prior = create_io_arrays([les_data], [setup])
+size(io_prior)
 
 #1st attempt
 #dataloader_prior = create_dataloader_prior(les_data.data[1]; rng=rng)
@@ -88,26 +89,24 @@ size(x_prior) #(nles, nles, 2, batch_size)
 # Neural network (CNN)
 model_prior, θ_prior = cnn(;
     setup=setup,
-    radii=[2, 2, 2, 2],
+    radii=[2, 2, 2, 2, 2],
     channels=[2, 8, 8, 8, 2], #2 dimensions `D`
-    activations=[leakyrelu, leakyrelu, leakyrelu, identity] ,
-    use_bias=[true, true, true, false],
+    activations=[leakyrelu, leakyrelu, leakyrelu, leakyrelu, identity] ,
+    use_bias=[true, true, true, true, false],
     channel_augmenter = identity,
     rng = rng)
 
-model_prior.chain
+model_prior.chain #only to visualize the model nicer?
 
 # Loss
-#mse_prior = mean_squared_error(model_prior, x_prior, y_prior, θ_prior) #not working
-loss_prior=create_loss_prior(mean_squared_error, model_prior)
-#loss_prior((x_prior, y_prior), θ_prior) # maybe this is not how is meant to be used
+loss_prior = create_loss_prior(mean_squared_error, model_prior)
 
 using Optimisers
-opt_prior = Optimisers.setup(Adam(T(1.0f-4)), θ_prior)
+opt_prior = Optimisers.setup(Adam(T(1.0f-4)), θ_prior);
 
 #training
 # have to solve this by for example: using GLMakie, for the moment skip
-#relerr_prior = create_relerr_prior(model_prior, x_prior, y_prior) # wrong: has to be vs validaiton set
+#relerr_prior = create_relerr_prior(model_prior, x_prior, y_prior) # wrong: has to be vs validation set
 #callback = create_callback(relerr_prior; θ=θ_prior, display_each_iteration = true)
 
 (; optstate, θ, callbackstate) = train(
@@ -115,9 +114,7 @@ opt_prior = Optimisers.setup(Adam(T(1.0f-4)), θ_prior)
         loss_prior,
         opt_prior,
         θ_prior;
-        niter = 100,
-        ncallback = 1,
-        callback = (i, θ) -> println("Iteration \$i of \$niter"),
-    )
-#use best parameters instead of last
-θ_prior = callbackstate.θmin
+        niter = 100
+    );
+#use best parameters instead of last (θ)
+θ_prior = callbackstate.θmin # only works if there is a callback saving this
