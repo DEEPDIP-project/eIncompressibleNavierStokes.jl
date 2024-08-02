@@ -1,6 +1,10 @@
 # Show number of threads on GitHub Actions
 @info "" Threads.nthreads()
 
+# Look for environment variable triggering local development modifications
+localdev = haskey(ENV, "LOCALDEV")
+@show localdev
+
 # Get access to example dependencies
 push!(LOAD_PATH, joinpath(@__DIR__, "..", "examples"))
 
@@ -88,9 +92,14 @@ example_pages = map(examples) do e
     end
 end
 
+vitepress_kwargs = localdev ? (;
+    # md_output_path = @__DIR__,
+    build_vitepress = false
+) : (;)
+
 makedocs(;
     # draft = true,
-    # clean = false,
+    # clean = !localdev,
     modules = [IncompressibleNavierStokes, NeuralClosure],
     plugins = [bib],
     authors = "Syver Døving Agdestein, Benjamin Sanderse, and contributors",
@@ -104,29 +113,27 @@ makedocs(;
     format = DocumenterVitepress.MarkdownVitepress(;
         repo = "github.com/agdestein/IncompressibleNavierStokes.jl",
         devurl = "dev",
+        vitepress_kwargs...,
     ),
     pagesonly = true,
     pages = [
         "Home" => "index.md",
         "Getting Started" => "getting_started.md",
-        "Examples" => vcat("Overview" => "examples/overview.md", example_pages),
-        "Equations" => [
-            "Incompressible Navier-Stokes equations" => "equations/ns.md",
-            "Spatial discretization" => "equations/spatial.md",
-            "Time discretization" => "equations/time.md",
+        "Examples" => vcat("Overview" => "examples/index.md", example_pages),
+        "Manual" => [
+            "Incompressible Navier-Stokes equations" => "manual/ns.md",
+            "Spatial discretization" => "manual/spatial.md",
+            "Time discretization" => "manual/time.md",
+            "Boundary conditions" => "manual/bc.md",
+            "Pressure solvers" => "manual/pressure.md",
+            "Floating point precision" => "manual/precision.md",
+            "GPU Support" => "manual/gpu.md",
+            "Operators" => "manual/operators.md",
+            "Temperature equation" => "manual/temperature.md",
+            "Large eddy simulation" => "manual/les.md",
+            "Neural closure models" => "manual/closure.md",
+            "API" => "manual/api.md",
         ],
-        "Features" => [
-            "Boundary conditions" => "features/bc.md",
-            "Pressure solvers" => "features/pressure.md",
-            "Floating point precision" => "features/precision.md",
-            "GPU Support" => "features/gpu.md",
-            "Operators" => "features/operators.md",
-            "Temperature equation" => "features/temperature.md",
-            "Large eddy simulation" => "features/les.md",
-            "Neural closure models" => "features/closure.md",
-        ],
-        "API Reference" =>
-            ["API" => "api/api.md", "Runge-Kutta methods" => "api/tableaux.md"],
         "References" => "references.md",
     ],
 )

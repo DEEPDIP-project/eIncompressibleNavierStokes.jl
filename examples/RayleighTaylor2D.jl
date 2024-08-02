@@ -1,6 +1,13 @@
+# # Rayleigh-Taylor instability in 2D
+#
+# Two fluids with different temperatures start mixing.
+
 #md using CairoMakie
 using GLMakie #!md
 using IncompressibleNavierStokes
+
+# Output directory for saving results
+outdir = joinpath(@__DIR__, "output", "RayleighTaylor2D")
 
 # Hardware
 ArrayType = Array
@@ -51,8 +58,9 @@ state, outputs = solve_unsteady(;
     Δt = T(5e-3),
     processors = (;
         rtp = realtimeplotter(;
+            path = joinpath(outdir, "solution.mp4"),
             setup,
-            nupdate = 10,
+            nupdate = 20,
             fieldname = :temperature,
             size = (400, 600),
         ),
@@ -60,5 +68,6 @@ state, outputs = solve_unsteady(;
     ),
 );
 
-# Results
-outputs.rtp
+#md # ```@raw html
+#md # <video src="../../RayleighTaylor2D.mp4" controls="controls" autoplay="autoplay" loop="loop"></video>
+#md # ```

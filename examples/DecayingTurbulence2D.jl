@@ -44,33 +44,42 @@ state, outputs = solve_unsteady(;
     tlims = (T(0), T(1)),
     Δt = T(1e-3),
     processors = (
-        ## rtp = realtimeplotter(; setup, nupdate = 1),
+        rtp = realtimeplotter(; setup, nupdate = 10),
         ehist = realtimeplotter(;
             setup,
             plot = energy_history_plot,
             nupdate = 10,
             displayfig = false,
         ),
-        espec = realtimeplotter(; setup, plot = energy_spectrum_plot, nupdate = 10),
-        ## anim = animator(; setup, path = "$outdir/solution.mkv", nupdate = 20),
+        espec = realtimeplotter(;
+            setup,
+            plot = energy_spectrum_plot,
+            nupdate = 10,
+            displayfig = false,
+        ),
+        ## anim = animator(; setup, path = joinpath(outdir, "solution.mp4"), nupdate = 10),
         ## vtk = vtk_writer(; setup, nupdate = 10, dir = outdir, filename = "solution"),
         ## field = fieldsaver(; setup, nupdate = 10),
         log = timelogger(; nupdate = 100),
     ),
 );
 
+#md # ```@raw html
+#md # <video src="../../DecayingTurbulence2D.mp4" controls="controls" autoplay="autoplay" loop="loop"></video>
+#md # ```
+
 # ## Post-process
 #
-# We may visualize or export the computed fields `(u, p)`
+# We may visualize or export the computed fields
+
+# Export to VTK
+save_vtk(state; setup, filename = joinpath(outdir, "solution"))
 
 # Energy history
 outputs.ehist
 
 # Energy spectrum
 outputs.espec
-
-# Export to VTK
-save_vtk(state; setup, filename = joinpath(outdir, "solution"))
 
 # Plot field
 fieldplot(state; setup)
