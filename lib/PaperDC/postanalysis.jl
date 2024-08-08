@@ -50,6 +50,8 @@ getorder(i) =
 # Choose where to put output
 plotdir = "output/postanalysis/plots"
 outdir = "output/postanalysis"
+outdir = "/Users/luisaorozco/Documents/Projects/DEEPDIP/IncompressibleNavierStokes.jl/lib/PaperDC/output/postanalysis"
+plotdir = "/Users/luisaorozco/Documents/Projects/DEEPDIP/IncompressibleNavierStokes.jl/lib/PaperDC/output/postanalysis/plots"
 ispath(plotdir) || mkpath(plotdir)
 ispath(outdir) || mkpath(outdir)
 
@@ -89,13 +91,13 @@ device = identity
 clean() = nothing
 
 # For running on a CUDA compatible GPU
-using LuxCUDA
-using CUDA
-T = Float32
-ArrayType = CuArray
-CUDA.allowscalar(false)
-device = x -> adapt(CuArray, x)
-clean() = (GC.gc(); CUDA.reclaim())
+#using LuxCUDA
+#using CUDA
+#T = Float32
+#ArrayType = CuArray
+#CUDA.allowscalar(false)
+#device = x -> adapt(CuArray, x)
+#clean() = (GC.gc(); CUDA.reclaim())
 
 ########################################################################## #src
 
@@ -179,14 +181,14 @@ io_valid = create_io_arrays(data_valid, setups_valid);
 io_test = create_io_arrays([data_test], setups_test);
 
 ## # Save IO arrays
-## jldsave("$outdir/io_train.jld2"; io_train)
-## jldsave("$outdir/io_valid.jld2"; io_valid)
-## jldsave("$outdir/io_test.jld2"; io_test)
+jldsave("$outdir/io_train.jld2"; io_train)
+jldsave("$outdir/io_valid.jld2"; io_valid)
+jldsave("$outdir/io_test.jld2"; io_test)
 ##
 ## # Load IO arrays
-## io_train = load("$outdir/io_train.jld2"; "io_train")
-## io_valid = load("$outdir/io_valid.jld2"; "io_valid")
-## io_test = load("$outdir/io_test.jld2"; "io_test")
+io_train = load("$outdir/io_train.jld2", "io_train")
+io_valid = load("$outdir/io_valid.jld2", "io_valid")
+io_test = load("$outdir/io_test.jld2", "io_test")
 
 # Check that data is reasonably bounded
 io_train[1].u |> extrema
@@ -228,17 +230,17 @@ end
 # for a fair comparison.
 rng = Random.Xoshiro(seeds.θ₀)
 
-## # CNN architecture 1
-## mname = "balzac"
-## closure, θ₀ = cnn(;
-##     setup = setups_train[1],
-##     radii = [2, 2, 2, 2],
-##     channels = [20, 20, 20, params_train.D],
-##     activations = [leakyrelu, leakyrelu, leakyrelu, identity],
-##     use_bias = [true, true, true, false],
-##     rng,
-## );
-## closure.chain
+# CNN architecture 1
+mname = "balzac"
+closure, θ₀ = cnn(;
+    setup = setups_train[1],
+    radii = [2, 2, 2, 2],
+    channels = [20, 20, 20, params_train.D],
+    activations = [leakyrelu, leakyrelu, leakyrelu, identity],
+    use_bias = [true, true, true, false],
+    rng,
+);
+closure.chain
 
 # CNN architecture 2
 mname = "rimbaud"
@@ -498,9 +500,9 @@ eprior = let
         testset = device(io_test[ig, ifil])
         err = create_relerr_prior(closure, testset...)
         prior[ig, ifil] = err(θ_cnn_prior[ig, ifil])
-        for iorder = 1:2
-            post[ig, ifil, iorder] = err(θ_cnn_post[ig, ifil, iorder])
-        end
+        #for iorder = 1:2
+        #    post[ig, ifil, iorder] = err(θ_cnn_post[ig, ifil, iorder])
+        #end
     end
     (; prior, post)
 end
@@ -540,7 +542,7 @@ eprior.post |> x -> reshape(x, :, 2) |> x -> round.(x; digits = 2)
             setup,
             psolver,
             method = RKProject(RK44(; T), getorder(iorder)),
-            closure_model = smagorinsky_closure(setup),
+            closure_model = IncompressibleNavierStokes.smagorinsky_closure(setup),
             nupdate,
         )
         e_smag[ig, ifil, iorder] = err(θ_smag[ifil, iorder])

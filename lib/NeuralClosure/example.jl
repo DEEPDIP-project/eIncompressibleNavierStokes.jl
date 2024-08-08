@@ -1,7 +1,7 @@
 # this test is for the NODE functionality of Syver repo
 using Makie
 using IncompressibleNavierStokes
-output = "output/test_F"
+
 T = Float32
 ArrayType = Array
 Re = T(1_000)

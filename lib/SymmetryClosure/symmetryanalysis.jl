@@ -83,7 +83,7 @@ clean() = nothing
 using LuxCUDA
 using CUDA;
 T = Float32;
-ArrayType = CuArray;
+ArrayType = Array;
 CUDA.allowscalar(false);
 device = x -> adapt(CuArray, x)
 clean() = (GC.gc(); CUDA.reclaim())
@@ -103,13 +103,13 @@ rng = Xoshiro(seeds.dns)
 # Parameters
 get_params(nlesscalar) = (;
     D = 2,
-    Re = T(10_000),
+    Re = T(1_00),
     tburn = T(0.05),
     tsim = T(0.5),
     Δt = T(5e-5),
     nles = map(n -> (n, n), nlesscalar), # LES resolutions
-    ndns = (n -> (n, n))(4096), # DNS resolution
-    ## ndns = (n -> (n, n))(1024), # DNS resolution
+    #ndns = (n -> (n, n))(4096), # DNS resolution
+    ndns = (n -> (n, n))(1024), # DNS resolution
     filters = (FaceAverage(),),
     ArrayType,
     create_psolver = psolver_spectral,
@@ -119,15 +119,16 @@ get_params(nlesscalar) = (;
 )
 
 # Get parameters for multiple LES resolutions
-nles = [64, 128, 256]
-params_train = (; get_params(nles)..., tsim = T(0.5), savefreq = 10);
+#nles = [64, 128, 256]
+nles = [64]
+params_train = (; get_params(nles)..., tsim = T(0.1), savefreq = 10);
 params_valid = (; get_params(nles)..., tsim = T(0.1), savefreq = 40);
 params_test = (; get_params(nles)..., tsim = T(0.1), savefreq = 10);
 
-create_data = false
+create_data = true
 if create_data
     ## Create filtered DNS data
-    data_train = [create_les_data(; params_train...) for _ = 1:5]
+    data_train = [create_les_data(; params_train...) for _ = 1:1]
     data_valid = [create_les_data(; params_valid...) for _ = 1:1]
     data_test = [create_les_data(; params_test...) for _ = 1:1]
 
@@ -228,7 +229,7 @@ m_cnn = let
     (; closure, θ₀, name)
 end;
 m_cnn.closure.chain
-
+typeof(m_cnn.closure)
 # Group CNN A: Same number of channels as regular CNN
 m_gcnn_a = let
     rng = Xoshiro(seeds.θ₀)
@@ -264,7 +265,8 @@ end;
 m_gcnn_b.closure.chain
 
 # Store models and initial parameters
-models = m_cnn, m_gcnn_a, m_gcnn_b;
+#models = m_cnn, m_gcnn_a, m_gcnn_b;
+models = [m_cnn]
 
 # Give the CNNs a test run
 # Note: Data and parameters are stored on the CPU, and
